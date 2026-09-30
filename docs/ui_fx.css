@@ -1,0 +1,243 @@
+/* ══════════════════════════════════════════════════════════════
+   娃娃機管理系統 · 共用 UI 動態效果（2026-09-26，移植自天鷹保全的 ui_fx）
+   搭配 ui_fx.js 使用；在 <head> 引入（放在 styles.css 後面）：
+     <link rel="stylesheet" href="ui_fx.css">
+     <script src="ui_fx.js"></script>
+   原則：
+   ・只動 transform／opacity（手機 GPU 處理，不拖慢畫面）
+   ・不加任何外部套件（這個 App 是離線可用的 PWA，見 sw.js）
+   ・手機設定「減少動態效果」時全部關閉、直接顯示結果（最下方 media query）
+   ・顏色一律引用 styles.css 的 :root 變數，之後改主色只要改 styles.css，這個檔不用動
+   ══════════════════════════════════════════════════════════════ */
+
+:root{
+  --fx-accent: var(--accent);   /* 專案主色（styles.css 的 --accent，目前是藍 #4F7BE8） */
+  --fx-err: var(--danger);      /* 失敗紅（styles.css 的 --danger） */
+  --fx-ok: var(--in);           /* 成功綠：styles.css 沒有獨立的「成功」色，綠色一律用 --in（入幣／正收益／營運中同一個綠） */
+}
+/* 半透明的主色／紅／綠用 color-mix() 從上面三個變數調出來，不另外寫死色碼。
+   不支援 color-mix 的舊瀏覽器（iOS 16.2 以前）只會少掉光暈、淡色外框，功能不受影響。 */
+
+/* ── 主要按鈕：按下漣漪＋光澤掃過（由 ui_fx.js 在按下時動態插入，動畫結束即移除）──
+   外層 .fx-rip-wrap 貼齊按鈕內框並自己裁切，所以不需要改按鈕本身的 overflow */
+.fx-rip-wrap{position:absolute;inset:0;border-radius:inherit;overflow:hidden;pointer-events:none}
+.fx-rip{position:absolute;border-radius:50%;background:rgba(255,255,255,.38);transform:scale(0);
+  animation:fxRip .6s ease-out forwards}
+.fx-shine{position:absolute;top:0;bottom:0;left:-60%;width:45%;
+  background:linear-gradient(100deg,transparent,rgba(255,255,255,.45),transparent);
+  transform:skewX(-20deg);animation:fxShine .7s ease forwards}
+@keyframes fxRip{to{transform:scale(1);opacity:0}}
+@keyframes fxShine{from{left:-60%}to{left:130%}}
+
+/* ── 讀取中：骨架畫面（ui_fx.js 的 fxSkeletonCards() 產生）──
+   卡片外框跟首頁的 .machine-card 一模一樣（背景、邊框、圓角、內距都引用 styles.css），
+   左邊方塊＝像素娃娃機、中間兩行＝機台名稱／位置、右邊＝今日淨收益，資料到了換上真卡片時版面不會跳 */
+.fx-sk-list{display:grid;gap:var(--gap)}
+.fx-sk-card{display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:12px}
+.fx-sk-info{flex:1;min-width:0}
+.fx-sk-fig{display:flex;flex-direction:column;align-items:flex-end}
+.fx-sk{display:block;border-radius:6px;
+  background:linear-gradient(90deg,rgba(255,255,255,.05) 25%,rgba(255,255,255,.12) 50%,rgba(255,255,255,.05) 75%);
+  background-size:200% 100%;animation:fxShimmer 1.2s linear infinite}
+.fx-sk-hint{text-align:center;font-size:13px;color:var(--muted)}
+@keyframes fxShimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+/* 資料到了之後的卡片依序淡入（給清單容器加 .fx-fadein 即可） */
+.fx-fadein > *{animation:fxRise .35s cubic-bezier(.2,.8,.2,1) backwards}
+.fx-fadein > *:nth-child(2){animation-delay:40ms}
+.fx-fadein > *:nth-child(3){animation-delay:80ms}
+.fx-fadein > *:nth-child(4){animation-delay:120ms}
+.fx-fadein > *:nth-child(5){animation-delay:160ms}
+.fx-fadein > *:nth-child(n+6){animation-delay:200ms}
+
+/* 依序浮現用的動畫：只寫 from、填充用 backwards，結束狀態沿用元素原本的樣式，
+   不會蓋掉 .btn／.machine-card 原本 :active 的按壓縮放 */
+@keyframes fxRise{from{opacity:0;transform:translateY(12px)}}
+
+/* 小塊骨架（行內用，例如某個數字還在讀取中） */
+.fx-sk-inline{display:inline-block;width:72px;height:18px;vertical-align:middle}
+
+/* 各畫面的骨架版面（app.js 的 loadingView() 組）：外觀照 styles.css 的 .stat／.card／.admin-item 做，
+   但刻意不用那些 class 名稱——程式和測試常用「.detail-hero／.admin-item 出現了」判斷資料到了，
+   骨架不能搶先冒充真畫面 */
+.fx-sk-view{display:grid;gap:var(--gap)}
+.fx-sk-row{display:flex;align-items:center;gap:14px}
+.fx-sk-row > .fx-sk-grow{flex:1;min-width:0}
+.fx-sk-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.fx-sk-figs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.fx-sk-figs > :first-child{grid-column:1 / -1;padding:14px}
+.fx-sk-stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 8px;min-width:0}
+.fx-sk-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+.fx-sk-item{display:flex;align-items:center;gap:10px;padding:11px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:var(--radius-sm)}
+@media (min-width:760px){
+  .fx-sk-stats.fx-sk-3{grid-template-columns:repeat(3,1fr)}
+  .fx-sk-stats.fx-sk-4{grid-template-columns:repeat(4,1fr)}
+}
+
+/* ── 分頁切換：滑動膠囊（ui_fx.js 的 fxMoveSlider() 負責定位）──
+   容器要 position:relative；膠囊在容器內絕對定位，顏色由各畫面自己的 CSS 決定 */
+.fx-slider{position:absolute;left:0;top:0;width:0;height:0;border-radius:999px;pointer-events:none;opacity:0}
+.fx-slider.fx-on{opacity:1}
+.fx-slider.fx-anim{transition:transform .3s cubic-bezier(.3,.9,.3,1),width .3s cubic-bezier(.3,.9,.3,1),
+  height .3s ease,background-color .3s ease,border-color .3s ease}
+
+/* ── 對話框／提示訊息的進出場改由 ui_fx.js 播（出場也有動畫），
+   styles.css 原本的 sheet-up／toast-in 進場動畫就讓出來，不然兩個動畫疊在一起會滑兩次。
+   ui_fx.js 真的有啟動才會在 <html> 加 fx-anim，沒載到時維持原本的動畫 */
+html.fx-anim .dialog,html.fx-anim .toast{animation:none}
+
+/* ── 提醒紅點呼吸（給紅點元素加 class="fx-pulse"）── */
+.fx-pulse{animation:fxPulse 1.8s ease-in-out infinite}
+@keyframes fxPulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--fx-err) 60%,transparent)}
+  50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--fx-err) 0%,transparent)}}
+
+/* ── 欄位漏填：紅框＋抖動（抖動用獨立 translate 屬性，不影響元素原本的 transform）──
+   outline-offset 跟 styles.css 的 input:focus 一樣是 -1px：紅框剛好蓋在原本藍色聚焦框的位置 */
+.fx-field-err{outline:2px solid var(--fx-err) !important;outline-offset:-1px;
+  box-shadow:0 0 0 4px color-mix(in srgb,var(--fx-err) 18%,transparent) !important;
+  animation:fxShake .38s ease-in-out}
+@keyframes fxShake{0%,100%{translate:0 0}20%{translate:-7px 0}40%{translate:7px 0}60%{translate:-5px 0}80%{translate:5px 0}}
+
+/* ── 回到頂端（右下；抬高到提示訊息上方，不跟它疊在一起；壓在對話框底下）── */
+.fx-top{position:fixed;right:calc(var(--safe-right) + 16px);bottom:calc(var(--safe-bottom) + 76px);z-index:90;
+  width:46px;height:46px;border-radius:50%;padding:0;
+  border:1px solid color-mix(in srgb,var(--fx-accent) 55%,transparent);background:var(--surface);color:var(--fx-accent);
+  font-size:20px;font-weight:900;cursor:pointer;
+  box-shadow:0 4px 16px rgba(0,0,0,.5);opacity:0;translate:0 14px;pointer-events:none;transition:opacity .2s,translate .2s}
+.fx-top.fx-on{opacity:1;translate:0 0;pointer-events:auto}
+.fx-top:active{scale:.9}
+
+/* ── 下拉更新：一支像素爪子從畫面最上面垂下來（ui_fx.js 的 fxPullToRefresh 畫的 SVG）──
+   拉的時候是灰色爪子、拉到門檻變主色（放開就更新）、更新中爪子夾起來一格一格上下動。
+   top 加上瀏海高度：這個 App 加到主畫面後狀態列是透明的（black-translucent），不加會被瀏海蓋住 */
+.fx-ptr{position:fixed;left:50%;top:var(--safe-top);z-index:100001;width:32px;height:44px;
+  color:#B8C0D0;transform:translate(-50%,-50px);opacity:0;pointer-events:none;
+  filter:drop-shadow(0 3px 6px rgba(0,0,0,.6))}
+.fx-ptr svg{display:block;overflow:visible}
+.fx-ptr .fx-ptr-l,.fx-ptr .fx-ptr-r{transition:transform .12s steps(1,end)}
+.fx-ptr.fx-ready{color:var(--fx-accent)}
+.fx-ptr.fx-busy{color:var(--fx-accent)}
+.fx-ptr.fx-busy .fx-ptr-l{transform:translateX(1px)}   /* 夾起來：兩邊的爪片往中間收一格 */
+.fx-ptr.fx-busy .fx-ptr-r{transform:translateX(-1px)}
+.fx-ptr.fx-busy svg{animation:fxPtrBob .8s steps(1,end) infinite}
+@keyframes fxPtrBob{0%{transform:translateY(0)}25%{transform:translateY(-4px)}50%{transform:translateY(-8px)}75%{transform:translateY(-4px)}}
+@keyframes fxSpin{to{rotate:360deg}}
+
+/* ── 按鈕內的小轉圈（例如「登入中…」）：顏色跟著按鈕文字（currentColor），藍底白字、綠字按鈕都適用 */
+.fx-btn-spin{display:inline-block;width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;
+  border-radius:50%;animation:fxSpin .7s linear infinite;vertical-align:-2px;margin-right:7px;opacity:.85}
+
+/* ══ 第二批（2026-09-26，咖哩選的 8 項）══ */
+
+/* ── 新增的那一筆亮一下再淡掉（app.js 給剛送出的紀錄加 .fx-flash）──
+   .record-item 左右沒有內距，用左右各 8px 的 box-shadow 把亮色往外延伸，不影響排版 */
+.fx-flash{animation:fxFlash 1.8s ease-out}
+@keyframes fxFlash{
+  0%,30%{background-color:color-mix(in srgb,var(--fx-accent) 22%,transparent);
+    box-shadow:-8px 0 0 color-mix(in srgb,var(--fx-accent) 22%,transparent),8px 0 0 color-mix(in srgb,var(--fx-accent) 22%,transparent)}
+  100%{background-color:transparent;box-shadow:-8px 0 0 transparent,8px 0 0 transparent}}
+
+/* ── 按鈕送出中（ui_fx.js 的 fxButtonBusy）：跟一般「不能按」的半透明分開，看得出是正在送 ── */
+.fx-btn-busy{cursor:progress;gap:7px}
+.fx-btn-busy:disabled{opacity:.85}
+.fx-btn-busy .fx-btn-spin{margin-right:0}
+
+/* ── 分頁滑動膠囊（app.js 在 .seg／.tabs 加 fx-tabs-slide，並放一個 .fx-slider）──
+   選中的藍底改由膠囊畫，從上一顆滑到新的一顆。容器 z-index:0 自成一層，膠囊壓在按鈕文字底下（-1）；
+   .tabs 沒選中的分頁底色改畫在 ::before（-2），膠囊才能從它們上面滑過去——看起來跟原本一樣 */
+.fx-tabs-slide{position:relative;z-index:0}
+.fx-tabs-slide > .fx-slider{z-index:-1;background:var(--fx-accent)}
+.seg.fx-tabs-slide > .fx-slider{border-radius:6px}
+.seg.fx-tabs-slide button.active{background:transparent}
+.tabs.fx-tabs-slide button{position:relative;background:transparent}
+.tabs.fx-tabs-slide button::before{content:"";position:absolute;inset:0;border-radius:inherit;background:var(--surface-2);z-index:-2}
+.tabs.fx-tabs-slide button.active{background:transparent;border-color:transparent}
+.tabs.fx-tabs-slide button.active::before{background:transparent}
+
+/* ── 記帳面板（入幣／出幣／活動…）打開時從上面滑下來（app.js 只在「剛打開」那一次加 .fx-panel-in）── */
+.fx-panel-in{animation:fxPanelIn .26s cubic-bezier(.2,.8,.2,1)}
+@keyframes fxPanelIn{from{opacity:0;transform:translateY(-8px)}}
+
+/* ── 報表長條圖：長條從中間那條零線長出來（正的往上、負的往下），app.js 只在資料變了的那一次加 .fx-grow ── */
+.chart.fx-grow rect{transform-box:fill-box;animation:fxBarGrow .5s cubic-bezier(.2,.8,.2,1) backwards}
+.chart.fx-grow rect.bar-pos{transform-origin:50% 100%}
+.chart.fx-grow rect.bar-neg{transform-origin:50% 0%}
+@keyframes fxBarGrow{from{transform:scaleY(0)}}
+
+/* ── 首頁往下捲時，固定在上面的標題／今日數字區下緣出現淡陰影，看得出機台清單是從它底下捲過去 ──
+   fx-scrolled 由 ui_fx.js 在 <html> 上切換 */
+.home-sticky{transition:box-shadow .2s ease}
+html.fx-scrolled .home-sticky{box-shadow:0 10px 14px -10px rgba(0,0,0,.8)}
+
+/* ══ 第三批（2026-09-26，咖哩選的 23 項）══ */
+
+/* ── 營業中的綠燈慢慢呼吸（app.js 給首頁營業狀態前面的小圓點加 .fx-breath）── */
+.fx-breath{animation:fxBreath 2.4s ease-in-out infinite}
+@keyframes fxBreath{
+  0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--fx-ok) 55%,transparent);opacity:1}
+  50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--fx-ok) 0%,transparent);opacity:.7}}
+
+/* ── 登入頁打開時：娃娃機從上面輕輕落下，標題、登入框、下面的小字依序浮上來（只有剛打開那一次）── */
+.fx-login-intro .login-head .pixel-machine{animation:fxDrop .62s cubic-bezier(.3,1.35,.5,1) backwards}
+.fx-login-intro .login-head h1{animation:fxRise .42s .16s cubic-bezier(.2,.8,.2,1) backwards}
+.fx-login-intro .login-card{animation:fxRise .45s .24s cubic-bezier(.2,.8,.2,1) backwards}
+.fx-login-intro .login-foot{animation:fxRise .42s .32s cubic-bezier(.2,.8,.2,1) backwards}
+@keyframes fxDrop{0%{transform:translateY(-56px);opacity:0}45%{opacity:1}}
+
+/* ── 空白提示的娃娃機在打瞌睡：z 一個接一個往右上飄走（沒有這段時 z 就靜靜排成一串，見 styles.css 的 .sleepy）── */
+.sleepy .zzz i{opacity:0;animation:fxZzz 3s linear infinite}
+.sleepy .zzz i:nth-child(2){animation-delay:1s}
+.sleepy .zzz i:nth-child(3){animation-delay:2s}
+@keyframes fxZzz{0%{opacity:0;transform:translate(0,0)}15%{opacity:.95}70%{opacity:.7}100%{opacity:0;transform:translate(16px,-26px)}}
+
+/* ── 底部對話框上方的小把手：提示「可以往下滑關掉」（ui_fx.js 的 fxSwipeToClose）；桌機置中的對話框不用 ── */
+.dialog-handle{width:42px;height:5px;border-radius:999px;background:var(--surface-3);margin:-8px auto 12px}
+@media (min-width:760px){.dialog-handle{display:none}}
+
+/* ── 記帳成功：「今日淨收益」右上角飄出這筆的金額（+$500／−$50），往上飄走淡掉 ──
+   app.js 的 playMachineReaction() 加上去、1.7 秒後拿掉；顏色跟記帳按鈕一樣（入幣綠、出幣橘、活動紫） */
+.fx-delta-anchor{position:relative}
+.fx-delta{position:absolute;right:12px;top:8px;font-size:17px;font-weight:800;font-variant-numeric:tabular-nums;
+  pointer-events:none;white-space:nowrap;text-shadow:0 2px 10px rgba(0,0,0,.7);
+  animation:fxDelta 1.6s cubic-bezier(.2,.8,.2,1) forwards}
+.fx-delta-in{color:var(--in)}
+.fx-delta-out{color:var(--out)}
+.fx-delta-prize{color:var(--prize)}
+@keyframes fxDelta{0%{opacity:0;transform:translateY(10px) scale(.85)}14%{opacity:1;transform:translateY(0) scale(1.08)}
+  24%{transform:translateY(0) scale(1)}70%{opacity:1;transform:translateY(-10px)}100%{opacity:0;transform:translateY(-28px)}}
+
+/* ── 按下登入、等後端的時候：登入頁娃娃機的爪子一直上下動（app.js 加 .fx-m-busy）──
+   包在 no-preference 裡：減少動態效果時就不蓋掉，爪子照平常的節奏動 */
+@media (prefers-reduced-motion: no-preference){
+  .pixel-machine.fx-m-busy.px-alive .px-claw.px-drop-2{animation:pxClawBusy .8s steps(1,end) infinite}
+  .pixel-machine.fx-m-busy.px-alive .px-cable.px-drop-2{animation:pxCableBusy .8s steps(1,end) infinite}
+}
+@keyframes pxClawBusy{0%{transform:translate(0px,0px)}25%{transform:translate(0px,1px)}50%{transform:translate(0px,2px)}75%{transform:translate(0px,1px)}}
+@keyframes pxCableBusy{0%{transform:scaleY(0)}25%{transform:scaleY(.5)}50%{transform:scaleY(1)}75%{transform:scaleY(.5)}}
+
+/* 手機設定「減少動態效果」：全部關掉，直接顯示結果（對長輩／容易頭暈的同事友善）。
+   App 本身原有的動畫（機台狀態燈閃爍、處理中方塊、轉圈圈）是刻意的設計，不在這裡關 */
+@media (prefers-reduced-motion: reduce){
+  .fx-rip,.fx-shine{display:none}
+  .fx-sk{animation:none}
+  .fx-fadein > *{animation:none}
+  .fx-slider.fx-anim{transition:none}
+  .fx-pulse{animation:none}
+  .fx-field-err{animation:none}
+  .fx-top{transition:none}
+  .fx-flash{animation:none}
+  .fx-btn-spin{display:none}
+  .fx-panel-in{animation:none}
+  .chart.fx-grow rect{animation:none}
+  .home-sticky{transition:none}
+  .fx-breath{animation:none}
+  .fx-login-intro .login-head .pixel-machine,.fx-login-intro .login-head h1,.fx-login-intro .login-card,.fx-login-intro .login-foot{animation:none}
+  .checkbox input.switch{transition:none}
+  .fx-delta{display:none}
+  .fx-ptr.fx-busy svg{animation:none}
+  .sleepy .zzz i{animation:none;opacity:.8}
+  .sleepy .zzz i:nth-child(2){transform:translate(7px,-9px)}
+  .sleepy .zzz i:nth-child(3){transform:translate(14px,-19px)}
+  .fx-ptr .fx-ptr-l,.fx-ptr .fx-ptr-r{transition:none}
+}

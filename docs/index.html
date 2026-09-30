@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>娃娃機管理系統 wei3</title>
+
+<!-- viewport-fit=cover 搭配 CSS 的 env(safe-area-inset-*)，
+     讓內容在有瀏海與 home indicator 的機型上不會被切到 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0B0E14">
+<meta name="description" content="娃娃機機台收益管理：入幣、出幣、活動與報表">
+
+<link rel="manifest" href="manifest.webmanifest">
+
+<!-- iOS 對 manifest 支援有限，真正讓「加入主畫面」後全螢幕（沒有網址列）的是這幾行 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="娃娃機wei3">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+
+<link rel="stylesheet" href="styles.css">
+
+<!-- 共用 UI 動態效果（按鈕漣漪、讀取中骨架、送出成功打勾、漏填標紅、下拉更新、刪除收合…），
+     用法與注意事項見 ui_fx.js 檔頭。defer：不擋第一個畫面，仍會在 app.js 開機（DOMContentLoaded）之前跑完。
+     沒載到也不影響功能，app.js 呼叫前都會先確認函式存在。 -->
+<link rel="stylesheet" href="ui_fx.css">
+<script src="ui_fx.js" defer></script>
+</head>
+<body>
+
+<div id="offline-bar" class="offline-bar" hidden>目前離線，資料可能不是最新的</div>
+
+<div id="update-bar" class="update-bar" hidden>
+  <span>有新版本可以使用</span>
+  <button type="button" id="update-btn" class="btn btn-sm">立即更新</button>
+</div>
+
+<main id="app" class="app">
+  <div class="boot">
+    <div class="boot-spinner" aria-hidden="true"></div>
+    <p>載入中…</p>
+  </div>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+
+<div id="busy-badge" class="busy-badge" hidden aria-live="polite">
+  <span class="busy-pixels" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+  <span>處理中…</span>
+</div>
+
+<!-- Phase 5 雙軌驗證用：BACKEND 預設 'gas' 時完全用不到這個 SDK，
+     留著載入也不影響原本的 GAS 路徑，只有 config.js 把 BACKEND 改成
+     'supabase' 才會實際初始化 client（見 app.js 的 supabaseClient()）。 -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<!-- Supabase 後端的「匯出Excel」用：GAS 版本是後端用 Google 試算表
+     現場轉存 .xlsx，Postgres 版本沒有等價的服務可以借，改成瀏覽器端
+     用 ExcelJS 現場組出檔案（見 app.js 的 _exportLedgerXlsxSupabase()）。
+     只有 BACKEND==='supabase' 才會用到，GAS 路徑完全不受影響。 -->
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
