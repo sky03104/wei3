@@ -199,7 +199,7 @@ const BACKEND = (window.APP_CONFIG && window.APP_CONFIG.BACKEND) || 'gas';
 /** 前端版本號，登入頁顯示用，方便確認手機上是不是最新版。
  *  跟 sw.js 的 CACHE_VERSION 手動保持一致——每次改前端兩個都要加。
  *  wei3 從原本資料庫版 v63 複製出來，版本號另外從 w3-v1 開始算。 */
-const APP_VERSION = 'w3-v4';
+const APP_VERSION = 'w3-v5';
 
 // ── 狀態 ────────────────────────────────────────────────
 
@@ -3741,9 +3741,10 @@ async function downloadLedgerXlsx(e) {
  * 一張長圖，現場對帳習慣一台一台分開傳，疊在一起反而要自己裁切。
  * 手繪 canvas、不叫外部套件，同一個理由見 exportLedgerImage() 的說明。
  */
-function _gridCellText(cell) {
+function _gridCellText(cell, isCount) {
   if (cell === '' || cell === null || cell === undefined) return '';
-  return typeof cell === 'number' ? money(cell) : String(cell);
+  if (typeof cell !== 'number') return String(cell);
+  return isCount ? cell.toLocaleString('zh-TW') : money(cell);
 }
 
 function drawLedgerGridCanvas(rangeLabel, m) {
@@ -3790,6 +3791,7 @@ function drawLedgerGridCanvas(rangeLabel, m) {
   ctx.fillText(m.machineName + '　' + rangeLabel, padX, y + titleH / 2);
   y += titleH;
 
+  const countCols = widths.length - (m.settlement ? 2 : 0); // 結算區那兩欄以外的欄位
   const drawRow = (cells, opts) => {
     opts = opts || {};
     cells.forEach((cell, i) => {
@@ -3804,7 +3806,9 @@ function drawLedgerGridCanvas(rangeLabel, m) {
       ctx.font = (opts.bold ? 'bold ' : '') + '12px ' + font;
       ctx.fillStyle = opts.neg ? colorNeg : (opts.bold ? colorText : colorMuted);
       ctx.textAlign = 'center';
-      ctx.fillText(_gridCellText(cell), colX[i] + widths[i] / 2, y + rowH / 2);
+      // 432／441 列是支數不是金額，不加 $；但同一列右邊的結算區（前期、租金）還是金額
+      const isCount = opts.count && i < countCols;
+      ctx.fillText(_gridCellText(cell, isCount), colX[i] + widths[i] / 2, y + rowH / 2);
     });
     ctx.strokeStyle = colorBorder;
     ctx.beginPath();
@@ -3821,7 +3825,9 @@ function drawLedgerGridCanvas(rangeLabel, m) {
   ctx.fillRect(padX, y + 1, tableRight - padX, dividerH - 2);
   y += dividerH;
 
-  m.summaryRows.forEach((row) => drawRow(row, { bold: true, labelBg: true, neg: row[0] === '+/-' }));
+  m.summaryRows.forEach((row) => drawRow(row, {
+    bold: true, labelBg: true, neg: row[0] === '+/-', count: row[0] === '432' || row[0] === '441'
+  }));
 
   return canvas;
 }
