@@ -63,6 +63,22 @@ where pronamespace = 'wei3'::regnamespace
   and not exists (select 1 from unnest(coalesce(proconfig, '{}')) c where c like 'search_path=wei3%');
 ```
 
+## 骰台結算區（本期／前期／租金／入幣*5%／總額）
+
+「骰台查詢」（全部骰台）按「📷 匯出截圖」或「⬇ 匯出 Excel」時，會先跳視窗問要不要加入前期、租金；
+每台的對帳表在「總出幣…+/-」那組欄位右邊多兩欄：
+
+| 列 | 內容 |
+|---|---|
+| 本期 | 該台查詢區間的 +/- 總計（照原數字，負的就是負的）。「本週」是週日到今天，要完整週日～週六請用「自訂」 |
+| 前期 | 有勾才帶：該台上一期（區間結束日早於本期起始日的最新一筆）匯出時存下的總額 |
+| 租金 | 有勾才帶：名稱（例：租金9/1-9/30）與金額填一次，再勾要扣的機台；沒勾的機台這格空白、不扣 |
+| 入幣*5% | -round(總入幣 × 5%) |
+| 總額 | 本期 + 前期 − 租金 − 入幣*5% |
+
+每次匯出都會把各台總額存進 `wei3.settlements`（同台同區間重複匯出是覆寫），下一期的「前期」就從這裡抓。
+只有管理員／巡邏人員會存檔，台主匯出只計算不存。資料表定義在 `supabase/settlements.sql`（要在 SQL editor 跑一次）。
+
 ## 部署
 
 - **網站**：GitHub → Settings → Pages → Source 選「Deploy from a branch」→ Branch 選 `main`、資料夾 `/docs` → Save。
