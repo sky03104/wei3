@@ -199,7 +199,7 @@ const BACKEND = (window.APP_CONFIG && window.APP_CONFIG.BACKEND) || 'gas';
 /** 前端版本號，登入頁顯示用，方便確認手機上是不是最新版。
  *  跟 sw.js 的 CACHE_VERSION 手動保持一致——每次改前端兩個都要加。
  *  wei3 從原本資料庫版 v63 複製出來，版本號另外從 w3-v1 開始算。 */
-const APP_VERSION = 'w3-v3';
+const APP_VERSION = 'w3-v4';
 
 // ── 狀態 ────────────────────────────────────────────────
 
@@ -1237,8 +1237,9 @@ function _defaultRentName() {
 }
 
 /**
- * 匯出前的「加入前期／租金」視窗。回傳 Promise：
- *   按匯出 → { prev: bool, rent: {name, amount, machineIds} | null }
+ * 匯出前的「總額／前期／租金」視窗。回傳 Promise：
+ *   沒勾總額按匯出 → { total: false }（照原本匯出，不加結算區）
+ *   有勾總額按匯出 → { total: true, prev: bool, rent: {name, amount, machineIds} | null }
  * machines：這次要匯出的骰台（_listCategoryMachines() 的結果），給租金勾選要扣哪幾台。
  *   取消／點外面／往下滑關掉 → null（不匯出）
  */
@@ -1252,6 +1253,7 @@ function askSettlementOptions(kindLabel, machines) {
       resolve(val);
     };
 
+    const totalBox = h('input', { type: 'checkbox', class: 'switch', role: 'switch' });
     const prevBox = h('input', { type: 'checkbox', class: 'switch', role: 'switch' });
     const rentBox = h('input', { type: 'checkbox', class: 'switch', role: 'switch' });
     const rentName = h('input', { type: 'text', value: _defaultRentName() });
@@ -1298,15 +1300,28 @@ function askSettlementOptions(kindLabel, machines) {
       h('div', { class: 'small muted', text: hint })
     ])]);
 
-    const body = [
-      h('p', { class: 'small muted', style: 'margin:0 0 12px', text: '每台會在「總出幣」右邊加上 本期／前期／租金／入幣*5%／總額。' }),
+    // 前期／租金只有勾了「總額」才有意義，收在一起、沒勾總額就藏起來
+    const totalOptions = h('div', {
+      hidden: true,
+      style: 'padding-left:14px;border-left:2px solid var(--border);margin-bottom:12px'
+    }, [
       toggleRow(prevBox, '加入前期', '自動帶入每台上一期匯出時的總額'),
       toggleRow(rentBox, '加入租金', '填一次名稱和金額，再勾要扣的機台'),
-      rentFields,
+      rentFields
+    ]);
+    totalBox.addEventListener('change', () => {
+      totalOptions.hidden = !totalBox.checked;
+      errorEl.hidden = true;
+    });
+
+    const body = [
+      toggleRow(totalBox, '總額', '在總出幣右邊加上 本期／前期／租金／入幣*5%／總額'),
+      totalOptions,
       errorEl
     ];
 
     const submit = () => {
+      if (!totalBox.checked) { finish({ total: false }); return; }
       let rent = null;
       if (rentBox.checked) {
         const name = rentName.value.trim() || '租金';
@@ -1325,7 +1340,7 @@ function askSettlementOptions(kindLabel, machines) {
         }
         rent = { name: name, amount: Math.round(amount), machineIds: machineIds };
       }
-      finish({ prev: prevBox.checked, rent: rent });
+      finish({ total: true, prev: prevBox.checked, rent: rent });
     };
 
     const backdrop = openDialog('匯出' + kindLabel, body, [
@@ -1336,7 +1351,7 @@ function askSettlementOptions(kindLabel, machines) {
   });
 }
 
-/** 「全部骰台」才有結算區；電子機台、單一機台維持原本的匯出。 */
+/** 「全部骰台」匯出才跳總額視窗；電子機台、單一機台維持原本的匯出。 */
 function _wantsSettlement(p) {
   return !p.machineId && p.category === 'dice';
 }
@@ -3691,6 +3706,7 @@ async function downloadLedgerXlsx(e) {
     if (!machines) return;
     settlement = await askSettlementOptions(' Excel', machines);
     if (!settlement) return;
+    if (!settlement.total) settlement = null; // 沒勾總額：照原本匯出
   }
   run(async () => {
     const xlsx = await api('exportLedgerXlsx', Object.assign({}, p, { settlement: settlement }));
@@ -3819,6 +3835,7 @@ async function exportLedgerScreenshots(e) {
     if (!machines) return;
     settlement = await askSettlementOptions('截圖', machines);
     if (!settlement) return;
+    if (!settlement.total) settlement = null; // 沒勾總額：照原本匯出
   }
   run(async () => {
     const data = await api('exportLedgerGrids', Object.assign({}, p, { settlement: settlement }));
