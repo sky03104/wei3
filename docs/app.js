@@ -199,7 +199,7 @@ const BACKEND = (window.APP_CONFIG && window.APP_CONFIG.BACKEND) || 'gas';
 /** 前端版本號，登入頁顯示用，方便確認手機上是不是最新版。
  *  跟 sw.js 的 CACHE_VERSION 手動保持一致——每次改前端兩個都要加。
  *  wei3 從原本資料庫版 v63 複製出來，版本號另外從 w3-v1 開始算。 */
-const APP_VERSION = 'w3-v2';
+const APP_VERSION = 'w3-v3';
 
 // ── 狀態 ────────────────────────────────────────────────
 
@@ -1099,6 +1099,18 @@ async function _meAndDashboard(sb) {
 /** forkScope/resetScope 的 sheet 名稱（GAS 分頁名）→ Postgres 資料表名稱。 */
 const SCOPE_SHEET_TO_TABLE = { QuickAmounts: 'quick_amounts', Prizes: 'prizes', MeterRates: 'meter_rates' };
 
+/** 這個分類看得到的機台（RLS 已篩過），依 sort_order、名稱排序；一台都沒有就報錯。 */
+async function _listCategoryMachines(sb, category) {
+  const { data: machines, error: mErr } = await sb.from('machines').select('machine_id, name, sort_order').eq('category', category);
+  if (mErr) throw _pgError(mErr);
+  if (!machines || !machines.length) {
+    const label = category === 'electronic' ? '電子機台' : '骰台';
+    throw ApiError('目前沒有看得到的' + label + '，無法匯出', 'ERROR');
+  }
+  machines.sort((a, b) => (a.sort_order - b.sort_order) || String(a.name).localeCompare(String(b.name)));
+  return machines;
+}
+
 /**
  * 對照 GAS 的 exportLedgerGrids()：不指定機台、只指定分類，一台一台
  * 各自呼叫 ledger_grid()，組成跟 GAS 版本一樣的 {range, machines[]} 形狀。
@@ -1108,13 +1120,7 @@ async function _exportLedgerGridsSupabase(sb, p) {
   if (p.machineId || !p.category) {
     throw ApiError('這個功能只支援「全部骰台」／「全部電子機台」這種分類查詢', 'ERROR');
   }
-  const { data: machines, error: mErr } = await sb.from('machines').select('machine_id, name, sort_order').eq('category', p.category);
-  if (mErr) throw _pgError(mErr);
-  if (!machines || !machines.length) {
-    const label = p.category === 'electronic' ? '電子機台' : '骰台';
-    throw ApiError('目前沒有看得到的' + label + '，無法匯出', 'ERROR');
-  }
-  machines.sort((a, b) => (a.sort_order - b.sort_order) || String(a.name).localeCompare(String(b.name)));
+  const machines = await _listCategoryMachines(sb, p.category);
 
   const rangeRows = await _rpc(sb, 'resolve_range', { p_preset: p.preset || 'day', p_from: p.from || null, p_to: p.to || null });
   const rangeRow = Array.isArray(rangeRows) ? rangeRows[0] : rangeRows;
@@ -1151,7 +1157,7 @@ async function _exportLedgerGridsSupabase(sb, p) {
 // 剛好對齊五列小計：
 //   本期     = 該台 +/- 總計（照原數字，負的就是負的）
 //   前期     = 該台上一期存下的總額（wei3.settlements，沒勾就空白、不算）
-//   租金     = -租金金額（全部骰台同一筆；沒勾就空白）
+//   租金     = -租金金額（名稱＋金額填一次，只扣有勾的那幾台；其他台空白）
 //   入幣*5%  = -round(總入幣 × 5%)
 //   總額     = 本期 + 前期 - 租金 - 入幣*5%
 // 算完把每台的總額 upsert 回 settlements（同台同區間覆寫），下一期的前期就抓得到。
@@ -1159,20 +1165,21 @@ async function _exportLedgerGridsSupabase(sb, p) {
 const SETTLEMENT_FEE_RATE = 0.05;
 
 /** 純計算：從一台的 summaryRows 算出結算區五項，不碰資料庫（方便單獨測）。 */
-function _computeSettlement(summaryRows, prevTotal, opts) {
+function _computeSettlement(summaryRows, prevTotal, opts, machineId) {
+  const rent = opts.rent && (opts.rent.machineIds || []).indexOf(machineId) >= 0 ? opts.rent : null;
   const last = (row) => Number(row[row.length - 1]) || 0;
   const net = last(summaryRows[4]);     // +/- 那列的總計
   const inTotal = last(summaryRows[3]); // 總入幣
   const prev = opts.prev ? (Number(prevTotal) || 0) : 0;
-  const rentAmt = opts.rent ? (Number(opts.rent.amount) || 0) : 0;
+  const rentAmt = rent ? (Number(rent.amount) || 0) : 0;
   const fee = Math.round(inTotal * SETTLEMENT_FEE_RATE);
   return {
-    net: net, prev: prev, rentAmt: rentAmt, fee: fee,
+    net: net, prev: prev, rentName: rent ? rent.name : null, rentAmt: rentAmt, fee: fee,
     total: net + prev - rentAmt - fee,
     cells: [
       ['本期', net],
       ['前期', opts.prev ? prev : ''],
-      [opts.rent ? opts.rent.name : '租金', opts.rent ? -rentAmt : ''],
+      [rent ? rent.name : '租金', rent ? -rentAmt : ''],
       ['入幣*5%', -fee],
       ['總額', net + prev - rentAmt - fee]
     ]
@@ -1200,7 +1207,7 @@ async function _fetchPrevSettlements(sb, machineIds, fromDate) {
 async function _applySettlement(sb, grids, range, opts) {
   const prevMap = opts.prev ? await _fetchPrevSettlements(sb, grids.map((g) => g.machineId), range.from) : {};
   const saveRows = grids.map((g) => {
-    const s = _computeSettlement(g.summaryRows, prevMap[g.machineId], opts);
+    const s = _computeSettlement(g.summaryRows, prevMap[g.machineId], opts, g.machineId);
     g.headerRow = g.headerRow.concat(['', '']);
     g.outRows = g.outRows.map((row) => row.concat(['', '']));
     g.summaryRows = g.summaryRows.map((row, i) => row.concat(s.cells[i]));
@@ -1209,7 +1216,7 @@ async function _applySettlement(sb, grids, range, opts) {
     return {
       machine_id: g.machineId, range_from: range.from, range_to: range.to,
       current_amt: s.net, prev_amt: s.prev,
-      rent_name: opts.rent ? opts.rent.name : null, rent_amt: s.rentAmt,
+      rent_name: s.rentName, rent_amt: s.rentAmt,
       fee_amt: s.fee, total: s.total
     };
   });
@@ -1231,10 +1238,11 @@ function _defaultRentName() {
 
 /**
  * 匯出前的「加入前期／租金」視窗。回傳 Promise：
- *   按匯出 → { prev: bool, rent: {name, amount} | null }
+ *   按匯出 → { prev: bool, rent: {name, amount, machineIds} | null }
+ * machines：這次要匯出的骰台（_listCategoryMachines() 的結果），給租金勾選要扣哪幾台。
  *   取消／點外面／往下滑關掉 → null（不匯出）
  */
-function askSettlementOptions(kindLabel) {
+function askSettlementOptions(kindLabel, machines) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (val) => {
@@ -1249,9 +1257,34 @@ function askSettlementOptions(kindLabel) {
     const rentName = h('input', { type: 'text', value: _defaultRentName() });
     const rentAmt = h('input', { type: 'number', inputmode: 'numeric', min: '0', step: '1', placeholder: '例：4500' });
     const errorEl = h('p', { class: 'small', style: 'color:var(--danger);margin:0 0 8px', hidden: true });
+    const machineBoxes = machines.map((m) => ({
+      id: m.machine_id,
+      box: h('input', { type: 'checkbox', value: m.machine_id })
+    }));
+    const allBtn = h('button', { type: 'button', class: 'btn btn-sm btn-ghost' }, '全選');
+    const syncAllBtn = () => {
+      allBtn.textContent = machineBoxes.every((x) => x.box.checked) ? '全不選' : '全選';
+    };
+    machineBoxes.forEach((x) => x.box.addEventListener('change', syncAllBtn));
+    allBtn.addEventListener('click', () => {
+      const check = !machineBoxes.every((x) => x.box.checked);
+      machineBoxes.forEach((x) => { x.box.checked = check; });
+      syncAllBtn();
+    });
+    const machineList = h('div', {
+      style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px 10px;max-height:36vh;overflow:auto;margin-bottom:14px'
+    }, machineBoxes.map((x, i) => h('label', {
+      style: 'display:flex;align-items:center;gap:6px;cursor:pointer'
+    }, [x.box, h('span', { text: machines[i].name })])));
+
     const rentFields = h('div', { hidden: true }, [
       dialogField('租金名稱', rentName),
-      dialogField('租金金額', rentAmt)
+      dialogField('租金金額', rentAmt),
+      h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:6px' }, [
+        h('span', { class: 'small muted', style: 'font-weight:600', text: '要扣租金的機台' }),
+        allBtn
+      ]),
+      machineList
     ]);
     rentBox.addEventListener('change', () => {
       rentFields.hidden = !rentBox.checked;
@@ -1268,7 +1301,7 @@ function askSettlementOptions(kindLabel) {
     const body = [
       h('p', { class: 'small muted', style: 'margin:0 0 12px', text: '每台會在「總出幣」右邊加上 本期／前期／租金／入幣*5%／總額。' }),
       toggleRow(prevBox, '加入前期', '自動帶入每台上一期匯出時的總額'),
-      toggleRow(rentBox, '加入租金', '全部骰台扣同一筆租金'),
+      toggleRow(rentBox, '加入租金', '填一次名稱和金額，再勾要扣的機台'),
       rentFields,
       errorEl
     ];
@@ -1284,7 +1317,13 @@ function askSettlementOptions(kindLabel) {
           rentAmt.focus();
           return;
         }
-        rent = { name: name, amount: Math.round(amount) };
+        const machineIds = machineBoxes.filter((x) => x.box.checked).map((x) => x.id);
+        if (!machineIds.length) {
+          errorEl.textContent = '請勾選要扣租金的機台';
+          errorEl.hidden = false;
+          return;
+        }
+        rent = { name: name, amount: Math.round(amount), machineIds: machineIds };
       }
       finish({ prev: prevBox.checked, rent: rent });
     };
@@ -1402,13 +1441,7 @@ async function _exportLedgerXlsxSupabase(sb, p) {
     totalRowCount = grid.rowCount;
     _writeLedgerWorksheet(workbook, '對帳表', grid);
   } else {
-    const { data: machines, error: mErr } = await sb.from('machines').select('machine_id, name, sort_order').eq('category', p.category);
-    if (mErr) throw _pgError(mErr);
-    if (!machines || !machines.length) {
-      const label = p.category === 'electronic' ? '電子機台' : '骰台';
-      throw ApiError('目前沒有看得到的' + label + '，無法匯出', 'ERROR');
-    }
-    machines.sort((a, b) => (a.sort_order - b.sort_order) || String(a.name).localeCompare(String(b.name)));
+    const machines = await _listCategoryMachines(sb, p.category);
 
     const rangeRows = await _rpc(sb, 'resolve_range', { p_preset: p.preset || 'day', p_from: p.from || null, p_to: p.to || null });
     const rangeRow = Array.isArray(rangeRows) ? rangeRows[0] : rangeRows;
@@ -3654,7 +3687,9 @@ async function downloadLedgerXlsx(e) {
   const p = state.reportParams;
   let settlement = null;
   if (_wantsSettlement(p)) {
-    settlement = await askSettlementOptions(' Excel');
+    const machines = await run(() => _listCategoryMachines(supabaseClient(), p.category), { button: button, busyText: '讀取中…' });
+    if (!machines) return;
+    settlement = await askSettlementOptions(' Excel', machines);
     if (!settlement) return;
   }
   run(async () => {
@@ -3780,7 +3815,9 @@ async function exportLedgerScreenshots(e) {
   const p = state.reportParams;
   let settlement = null;
   if (_wantsSettlement(p)) {
-    settlement = await askSettlementOptions('截圖');
+    const machines = await run(() => _listCategoryMachines(supabaseClient(), p.category), { button: button, busyText: '讀取中…' });
+    if (!machines) return;
+    settlement = await askSettlementOptions('截圖', machines);
     if (!settlement) return;
   }
   run(async () => {
