@@ -15,7 +15,7 @@
  * app.js 的 APP_VERSION（登入頁顯示用）要跟著一起改，兩邊保持同一個字串。
  */
 
-const CACHE_VERSION = 'w3-v6';
+const CACHE_VERSION = 'w3-v9';
 // 快取名稱加上 wei3 前綴：GitHub Pages 上 sky03104.github.io 底下的網站（試算表版 /wei、
 // 這個 /wei3）共用同一份瀏覽器快取空間，換版時只清自己的舊快取，不要清到別的 App 的。
 const CACHE_PREFIX = 'wei3-shell-';
