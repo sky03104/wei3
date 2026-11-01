@@ -199,7 +199,7 @@ const BACKEND = (window.APP_CONFIG && window.APP_CONFIG.BACKEND) || 'gas';
 /** 前端版本號，登入頁顯示用，方便確認手機上是不是最新版。
  *  跟 sw.js 的 CACHE_VERSION 手動保持一致——每次改前端兩個都要加。
  *  wei3 從原本資料庫版 v63 複製出來，版本號另外從 w3-v1 開始算。 */
-const APP_VERSION = 'w3-v9';
+const APP_VERSION = 'w3-v10';
 
 // ── 狀態 ────────────────────────────────────────────────
 
@@ -1579,7 +1579,7 @@ async function supabaseApi(action, payload) {
     endBusinessDay: () => ['end_business_day', {}],
     reopenBusinessDay: () => ['reopen_business_day', {}],
     saveDailyLedger: () => ['save_daily_ledger', {
-      p_turnover: p.turnover || 0, p_manual_expense: p.manualExpense || 0, p_manual432: p.manual432 || 0,
+      p_turnover: p.turnover || 0, p_manual_expense: 0, p_manual_expense_items: p.manualExpenseItems || [], p_manual432: p.manual432 || 0,
       p_manual441: p.manual441 || 0, p_given_to_owner_items: p.givenToOwnerItems || [], p_taken_by_owner_items: p.takenByOwnerItems || [],
       p_returned_to_house: 0
     }],
@@ -2137,6 +2137,8 @@ function homeTabBar() {
  * 放在出幣下面）；其餘手動
  * 輸入、會加回或扣掉總結餘的項目再拆成「收入（+）」「支出（-）」兩個
  * 小分類，方便現場核對明細時知道哪些是加、哪些是扣。
+ * 開銷（自訂名稱的多筆明細）不歸在「支出」裡，放在最底下自成一個黃色分組，
+ * 分組標題右邊顯示開銷加總（section.total），底下逐筆列出，還是會從總結餘扣掉。
  *
  * 這份資料跟卡片畫面（DOM）跟匯出截圖（canvas）共用同一份，避免兩邊
  * 各寫一次、改一邊忘了改另一邊。每一行是 [標籤, 金額]，分類標題則是
@@ -2148,6 +2150,7 @@ function ledgerRows(data) {
     .map((it) => [it.name, it.amount]);
   const takenRows = (l.takenByOwnerItems.length ? l.takenByOwnerItems : [{ name: '台主領', amount: 0 }])
     .map((it) => [it.name, -it.amount]);
+  const expenseRows = (l.manualExpenseItems || []).map((it) => [it.name, -it.amount]);
   return [
     ['週轉金', l.turnover],
     ['入幣', data.diceTotal.in],
@@ -2158,8 +2161,10 @@ function ledgerRows(data) {
     { section: '支出（-）' },
     ['432活動出獎', -l.manual432],
     ['441活動出獎', -l.manual441],
-    ['開銷', -l.manualExpense],
-    ...takenRows
+    ...takenRows,
+    // 開銷跟「支出」分開，放在最底下自成一區，標題旁顯示加總，底下逐筆列出自訂名稱。
+    { section: '開銷', total: -l.manualExpense },
+    ...expenseRows
   ];
 }
 
@@ -2187,7 +2192,12 @@ function ledgerCard(data) {
       h('h3', { text: (data.todayOpenedByName ? data.todayOpenedByName + ' ' : '') + dayKeyToLabel(data.today) })
     ]),
     h('div', {}, rows.map((row) => row.section
-      ? h('div', { class: 'ledger-section-title', text: row.section })
+      ? (row.total === undefined
+        ? h('div', { class: 'ledger-section-title', text: row.section })
+        : h('div', { class: 'ledger-section-title ledger-section-total' }, [
+          h('span', { text: row.section }),
+          h('span', { class: 'num', text: money(row.total) })
+        ]))
       : h('div', { class: 'ledger-row' }, [
         h('span', { class: 'ledger-label', text: row[0] }),
         h('span', { class: 'ledger-value num ' + netClass(row[1]), text: money(row[1]) })
@@ -2260,6 +2270,11 @@ function exportLedgerImage(data) {
       ctx.fillStyle = colorSection;
       ctx.textAlign = 'left';
       ctx.fillText(row.section, padX, y + rowH / 2);
+      if (row.total !== undefined) {
+        ctx.textAlign = 'right';
+        ctx.fillText(money(row.total), width - padX, y + rowH / 2);
+        ctx.textAlign = 'left';
+      }
       y += rowH;
       return;
     }
@@ -2406,7 +2421,6 @@ function ledgerItemsEditor(initialItems, defaultName) {
 function editDailyLedger(data) {
   const l = data.ledger;
   const setToday = !!l.updatedAt;
-  const manualExpense = h('input', { type: 'number', inputmode: 'decimal', min: '0', value: setToday ? (l.manualExpense || '') : '' });
   const turnover = h('input', {
     type: 'number', inputmode: 'decimal',
     value: setToday ? l.turnover : (data.previousLedgerTotal === null || data.previousLedgerTotal === undefined ? '' : data.previousLedgerTotal)
@@ -2415,16 +2429,17 @@ function editDailyLedger(data) {
   const manual441 = h('input', { type: 'number', inputmode: 'decimal', min: '0', value: setToday ? (l.manual441 || '') : '' });
   const givenEditor = ledgerItemsEditor(setToday ? l.givenToOwnerItems : [], '台主給');
   const takenEditor = ledgerItemsEditor(setToday ? l.takenByOwnerItems : [], '台主領');
+  const expenseEditor = ledgerItemsEditor(setToday ? (l.manualExpenseItems || []) : [], '花了什麼');
 
   openDialog('設定今日數字', [
     h('p', { class: 'small muted', style: 'margin-bottom:12px' },
-      '這些是整間店當天的現金調度，跟哪一台機台無關。台主領、開銷、432/441 請直接輸入正數金額，系統會自動從總結餘扣除；週轉金、台主給則是加回總結餘。432/441 是自動算出來的活動金額之外，另外辦活動時的手動支出；開銷是每天一般的手動現金支出。台主給／台主領可以按「+ 新增一筆」記好幾位台主，名字可以自己改。每天只會存一組數字，重新儲存會覆蓋掉今天原本的值。'),
-    dialogField('開銷（會自動扣除）', manualExpense),
+      '這些是整間店當天的現金調度，跟哪一台機台無關。台主領、開銷、432/441 請直接輸入正數金額，系統會自動從總結餘扣除；週轉金、台主給則是加回總結餘。432/441 是自動算出來的活動金額之外，另外辦活動時的手動支出；開銷是每天一般的手動現金支出，可以按「+ 新增一筆」記好幾筆，名稱（例如「買飲料」）和金額都自己填。台主給／台主領也一樣可以記好幾位台主，名字可以自己改。每天只會存一組數字，重新儲存會覆蓋掉今天原本的值。'),
     dialogField('週轉金', turnover),
     dialogField('432活動出獎（會自動扣除）', manual432),
     dialogField('441活動出獎（會自動扣除）', manual441),
     dialogField('台主給', givenEditor.node),
-    dialogField('台主領（會自動扣除）', takenEditor.node)
+    dialogField('台主領（會自動扣除）', takenEditor.node),
+    dialogField('開銷（會自動扣除）', expenseEditor.node)
   ], [
     h('button', { class: 'btn', onclick: closeDialog }, '取消'),
     h('button', {
@@ -2432,7 +2447,7 @@ function editDailyLedger(data) {
       onclick: (e) => run(async () => {
         await api('saveDailyLedger', {
           turnover: Number(turnover.value) || 0,
-          manualExpense: Number(manualExpense.value) || 0,
+          manualExpenseItems: expenseEditor.getItems(),
           manual432: Number(manual432.value) || 0,
           manual441: Number(manual441.value) || 0,
           givenToOwnerItems: givenEditor.getItems(),
