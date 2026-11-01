@@ -1164,7 +1164,8 @@ as $$
   -- 逐天取那一天 daily_ledger 最新（seq 最大）的一列，同一天可能因為忘記
   -- 結單又重開之類的情況存過好幾列，只算最後那列，其餘視為被覆蓋。
   latest_ledger_per_day as (
-    select distinct on (business_date) business_date, manual_expense
+    select distinct on (business_date) business_date, manual_expense,
+      ledger_items_or_legacy(manual_expense_items, manual_expense, '開銷') as items
     from daily_ledger
     where business_date between (select range_from from range) and (select range_to from range)
     order by business_date, seq desc
@@ -1176,7 +1177,13 @@ as $$
     ),
     'count432', (select count432 from counts),
     'count441', (select count441 from counts),
-    'manualExpense', coalesce((select sum(manual_expense) from latest_ledger_per_day), 0)
+    'manualExpense', coalesce((select sum(manual_expense) from latest_ledger_per_day), 0),
+    -- 2026-11-01：每天的開銷明細（只列有開銷的日子，日期由舊到新）
+    'manualExpenseDays', coalesce((
+      select jsonb_agg(jsonb_build_object('date', business_date::text, 'items', items) order by business_date)
+      from latest_ledger_per_day
+      where jsonb_array_length(items) > 0
+    ), '[]'::jsonb)
   );
 $$;
 

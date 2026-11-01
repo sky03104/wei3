@@ -199,7 +199,7 @@ const BACKEND = (window.APP_CONFIG && window.APP_CONFIG.BACKEND) || 'gas';
 /** 前端版本號，登入頁顯示用，方便確認手機上是不是最新版。
  *  跟 sw.js 的 CACHE_VERSION 手動保持一致——每次改前端兩個都要加。
  *  wei3 從原本資料庫版 v63 複製出來，版本號另外從 w3-v1 開始算。 */
-const APP_VERSION = 'w3-v10';
+const APP_VERSION = 'w3-v11';
 
 // ── 狀態 ────────────────────────────────────────────────
 
@@ -3614,7 +3614,21 @@ function viewActivityQuery() {
     statBox('開銷', money(r.manualExpense), '')
   ]);
 
-  return h('div', {}, [nav, title, customRange, stats]);
+  // 依日期列出每一筆開銷（名稱＋金額）；沒有任何開銷的日子不列。
+  // 資料庫還沒更新（沒有 manualExpenseDays 欄位）時整塊不顯示，免得誤報「沒有開銷」。
+  const days = r.manualExpenseDays || [];
+  const detail = r.manualExpenseDays === undefined ? null : h('div', { class: 'card' }, [
+    h('div', { class: 'ledger-section-title', text: '開銷明細' }),
+    ...(days.length ? days.flatMap((d) => [
+      h('div', { class: 'small muted', style: 'margin:10px 0 2px', text: dayKeyToLabel(d.date) }),
+      ...d.items.map((it) => h('div', { class: 'ledger-row' }, [
+        h('span', { class: 'ledger-label', text: it.name }),
+        h('span', { class: 'ledger-value num', text: money(it.amount) })
+      ]))
+    ]) : [h('p', { class: 'small muted', text: '這段期間沒有開銷紀錄。' })])
+  ]);
+
+  return h('div', {}, [nav, title, customRange, stats, detail].filter(Boolean));
 }
 
 // ── 畫面：報表 ──────────────────────────────────────────
